@@ -6,7 +6,7 @@ The goal is to learn real, production-grade cloud ML engineering by building a f
 
 ---
 
-## 🚀 Current Status (Phase 1 Complete)
+##  Current Status (Phase 1 Complete)
 - AWS CLI + IAM configuration completed  
 - S3 bucket created  
 - Data ingestion script (`ingest_market_data.py`) working  
@@ -18,7 +18,7 @@ Next step: **Processing Layer** — merge raw files, compute returns + volatilit
 
 ---
 
-## 🧱 Planned Architecture
+##  Planned Architecture
 - **Ingestion Layer:** yfinance → S3  
 - **Processing Layer:** returns, volatility, correlations  
 - **Analytics Layer:** risk metrics, portfolio optimization  
