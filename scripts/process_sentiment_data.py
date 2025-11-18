@@ -8,8 +8,8 @@ import subprocess
 
 RAW_DIR = "data/rss_raw"
 PROCESSED_DIR = "data/rss_processed"
+FULL_DIR = "data/rss_processed_full"
 
-# Your S3 bucket
 BUCKET = "healthcare-ml-pipeline"
 
 
@@ -33,7 +33,7 @@ model.eval()
 
 
 def compute_sentiment(text):
-    """Run FinBERT sentiment on a piece of text."""
+    """Run FinBERT sentiment on text."""
     if not isinstance(text, str) or len(text.strip()) == 0:
         return None, None
 
@@ -47,16 +47,17 @@ def compute_sentiment(text):
 
     labels = ["negative", "neutral", "positive"]
     sentiment_label = labels[probs.argmax()]
-    sentiment_score = float(probs.max())  # confidence score
+    sentiment_score = float(probs.max())
 
     return sentiment_label, sentiment_score
 
 
 # -----------------------------
-# MAIN PROCESSOR
+# MAIN PROCESSOR + APPEND LOGIC
 # -----------------------------
 def process_raw_rss(date_str=None):
     ensure_dir(PROCESSED_DIR)
+    ensure_dir(FULL_DIR)
 
     if date_str is None:
         date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
@@ -70,10 +71,8 @@ def process_raw_rss(date_str=None):
 
     df = pd.read_json(raw_path)
 
-    # Combine title + summary for better sentiment signal
+    # Full text = title + summary
     df["full_text"] = df["title"].astype(str) + ". " + df["summary"].astype(str)
-
-    # Clean whitespace
     df["full_text"] = df["full_text"].str.replace("\n", " ", regex=False).str.strip()
 
     sentiments = []
@@ -87,17 +86,42 @@ def process_raw_rss(date_str=None):
     df["sentiment_label"] = sentiments
     df["sentiment_score"] = scores
 
-    # Save processed parquet
+    # Save daily processed file
     processed_path = os.path.join(PROCESSED_DIR, f"rss_processed_{date_str}.parquet")
     df.to_parquet(processed_path, index=False)
-
     print(f"Saved processed parquet: {processed_path}")
 
-    # Upload to S3
-    s3_path = f"s3://{BUCKET}/processed/rss/{date_str}.parquet"
-    upload_to_s3(processed_path, s3_path)
+    # Upload daily to S3
+    upload_to_s3(processed_path, f"s3://{BUCKET}/processed/rss/{date_str}.parquet")
+    print("Uploaded processed daily file to S3.")
 
-    print(f"Uploaded processed data to: {s3_path}")
+    # -----------------------------
+    # APPEND INTO FULL MASTER DATASET
+    # -----------------------------
+    full_path = os.path.join(FULL_DIR, "sentiment_full.parquet")
+
+    if os.path.exists(full_path):
+        print("Loading existing full sentiment dataset...")
+        full_df = pd.read_parquet(full_path)
+    else:
+        print("No full sentiment dataset found — creating new one.")
+        full_df = pd.DataFrame(columns=df.columns)
+
+    # Append
+    combined = pd.concat([full_df, df], ignore_index=True)
+
+    # Deduplicate by link
+    combined = combined.drop_duplicates(subset=["link"])
+
+    # Save updated full dataset
+    combined.to_parquet(full_path, index=False)
+    print(f"Updated full dataset saved: {full_path}")
+
+    # Upload full dataset to S3
+    upload_to_s3(full_path, f"s3://{BUCKET}/processed/sentiment_full.parquet")
+    print("Uploaded full master dataset to S3.")
+
+    print("DONE.")
 
 
 if __name__ == "__main__":
